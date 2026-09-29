@@ -45,10 +45,16 @@ export const GAIT = {
 
   /** pelvis vertical oscillation, m (half peak-to-peak) */
   pelvisRise: 0.045,
-  /** how much the trunk pitches forward between upright and max drive */
-  leanUpright: 6,
-  leanMaxVelocity: 12,
-  leanDrive: 45,
+  /**
+   * Trunk pitch from vertical, degrees. A sprinter is *not* upright at speed:
+   * published 100 m kinematics put the trunk at roughly 20-25 deg at maximum
+   * velocity and at 40-45 deg while driving out of the blocks, where the torso
+   * is still folded over the front knee. The posture therefore *rises* as the
+   * athlete accelerates, which is the opposite of folding further forward.
+   */
+  leanUpright: 8,
+  leanMaxVelocity: 24,
+  leanDrive: 42,
   leanCrouch: 84,
 
   /** maximum hip flexion during the drive/swing, degrees */
@@ -64,10 +70,24 @@ export const GAIT = {
   /** the landing foot passes under the centre of mass at max velocity */
   footUnderCom: 0.94,
 
-  /** upper arm swing amplitude either side of vertical, degrees */
-  armSwing: 78,
-  /** elbow angle held through the swing, degrees */
-  armElbow: 88,
+  /**
+   * Arm action, degrees. The swing is deliberately *asymmetric*: the hand
+   * travels from fully extended behind the hip to roughly level with the
+   * sternum in front, so flexion always exceeds extension. A symmetric swing
+   * is the single clearest tell of a puppet.
+   */
+  /** shoulder flexion at the forward peak */
+  armForward: 78,
+  /** shoulder extension at the backward peak */
+  armBack: 38,
+  /** mean elbow flexion through the swing */
+  armElbow: 84,
+  /** how far the elbow flexes/extends either side of that mean */
+  armElbowSwing: 20,
+  /** how much the arm adducts, so the hands pass close to the midline */
+  armAdduct: 7,
+  /** phase warp that makes the arm ease through the front and snap through the back */
+  armDriveBias: 0.16,
 
   /** stance fraction of a step (contact / period) at top speed */
   stanceTopSpeed: 0.45,

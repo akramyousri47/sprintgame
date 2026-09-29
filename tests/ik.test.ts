@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ANKLE_REST, footTarget, pelvisHeightFor, solveLegIK, stanceGeometry } from '../src/biomechanics/ik';
+import { ANKLE_REST, footTarget, pelvisHeightFor, solveLegIK, solveLegToTarget, stanceGeometry } from '../src/biomechanics/ik';
 import { paramsFromStats } from '../src/biomechanics/athlete';
 import { GAIT, rad } from '../src/game/config';
 
@@ -250,7 +250,9 @@ describe('pelvisHeightFor', () => {
     const pelvisY = pelvisHeightFor(p.limb, geo.contactReach, 1, 0, 0);
     for (let phase = 0; phase <= 1; phase += 0.02) {
       const t = footTarget(phase, 0.4, geo, 11);
-      const sol = solveLegIK(pelvisY, 0, t.y, t.z, p.limb.thigh, p.limb.shank);
+      // the target is absolute above the track; the solver works in the pelvis'
+      // own frame, so the pelvis height has to come back out
+      const sol = solveLegToTarget(t.y - pelvisY, t.z, p.limb);
       expect(sol.reach).toBeLessThanOrEqual(1);
     }
   });
@@ -263,7 +265,7 @@ describe('the two agree', () => {
         const geo = stanceGeometry(p.limb, p.limb.hipHeight, speed, GAIT.contactMax, strikeFraction);
         const pelvisY = pelvisHeightFor(p.limb, geo.contactReach, 1, 0, 0);
         const t = footTarget(0.001, 0.4, geo, speed);
-        const sol = solveLegIK(pelvisY, 0, t.y, t.z, p.limb.thigh, p.limb.shank);
+        const sol = solveLegToTarget(t.y - pelvisY, t.z, p.limb);
         // the foot is inside the leg's reach, so the knee keeps a real bend
         expect(sol.reach).toBeLessThan(1);
         expect(sol.knee).toBeGreaterThan(0);

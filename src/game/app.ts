@@ -81,6 +81,10 @@ export class GameApp {
 
   startRace(): void {
     const s = useGame.getState();
+    // the two humans can never share a lane, whichever screen started the race
+    if (s.mode === 'versus' && s.player2Lane === s.playerLane) {
+      s.patch({ player2Lane: (s.playerLane + 1) % TRACK.lanes });
+    }
     s.patch({
       seed: (s.seed * 1664525 + 1013904223) >>> 0,
       results: null,
@@ -200,6 +204,9 @@ export class GameApp {
         return;
       }
     }
+    // the keypress is a real gesture, so it can also unlock the audio context —
+    // otherwise a keyboard-only player reaches the gun with silence
+    void audio.start();
     // confirm advances along the same path the on-screen primary button takes:
     // Enter on the title screen is a quick race, exactly as the title promises
     if (st.screen === 'title') {
@@ -209,6 +216,8 @@ export class GameApp {
       st.setScreen('title');
     } else if (st.screen === 'athlete') {
       st.setScreen('lane');
+    } else if (st.screen === 'lane') {
+      this.startRace();
     }
   }
 

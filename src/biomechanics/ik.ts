@@ -12,7 +12,7 @@
  * so the stance can never demand more reach than the leg has.
  */
 
-import { clamp, lerp, rad, smoothstep } from '../game/config';
+import { GAIT, clamp, lerp, rad, smoothstep } from '../game/config';
 import type { Limb } from './athlete';
 
 export interface LegIK {
@@ -82,6 +82,47 @@ export function solveLegIK(
 /** ankle height above the track at contact, m (shoe sole thickness) */
 export const ANKLE_REST = 0.075;
 
+/** how far below the pelvis the hip joint sits, m */
+export const HIP_JOINT_Y = 0.015;
+
+/**
+ * Solve a leg for a target expressed in the pelvis' own frame.
+ *
+ * The animator gets its foot target by pushing the world-space ankle through
+ * `hips.worldToLocal`, so `targetY` is measured from the *pelvis origin* and is
+ * negative for a foot anywhere near the ground. The thigh bone hangs from
+ * `HIP_JOINT_Y` below that origin, so that is the height the solver has to
+ * measure from.
+ *
+ * This wrapper exists because getting that frame wrong is silent: the solver
+ * happily returns a leg for a target a centimetre from the hip, and the rig
+ * renders a knee-up crouch that never touches the track. One named convention,
+ * used by the animator and the tests alike, is cheaper than remembering it.
+ */
+export function solveLegToTarget(
+  targetY: number,
+  targetZ: number,
+  limb: Limb,
+  poleForward = 1,
+): LegIK {
+  return solveLegIK(HIP_JOINT_Y, 0, targetY, targetZ, limb.thigh, limb.shank, poleForward);
+}
+
+/** smooth keyframe track over a normalised phase, kept local to the solver */
+function track(phase: number, keys: readonly (readonly [number, number])[]): number {
+  const p = phase - Math.floor(phase);
+  for (let i = 1; i < keys.length; i++) {
+    if (p <= keys[i][0]) {
+      const [t0, v0] = keys[i - 1];
+      const [t1, v1] = keys[i];
+      let u = (p - t0) / Math.max(1e-5, t1 - t0);
+      u = u * u * (3 - 2 * u);
+      return lerp(v0, v1, u);
+    }
+  }
+  return keys[keys.length - 1][1];
+}
+
 /**
  * Where a foot must be for the current stride phase.
  *
@@ -107,6 +148,16 @@ export interface StanceGeometry {
   slip: number;
   /** furthest behind the hip the ankle may be planted and still be reached, m */
   behindLimit: number;
+  /**
+   * Ankle height above the track at the top of the recovery fold, m. A sprinter
+   * does not swing a straight leg forward: the heel comes up toward the seat
+   * while the knee drives through, and the fold is what reads as speed. The
+   * value is derived from the leg's own length so a tall athlete folds as
+   * deeply as a short one instead of every rig sharing a magic number.
+   */
+  recoveryY: number;
+  /** how far behind the hip the heel comes at the top of the fold, m */
+  recoveryZ: number;
 }
 
 export function stanceGeometry(
@@ -124,6 +175,10 @@ export function stanceGeometry(
   const geoMax = Math.sqrt(Math.max(0.01, leg * leg - spanY * spanY));
   // longer steps are struck further out, but never past what the leg allows
   const desired = 0.24 + strikeFraction * 0.12;
+  // the fold: heel to seat puts the ankle at roughly 45% of full leg extension
+  // from the hip and behind it, which is a 120 deg knee bend
+  const foldDist = leg * 0.42;
+  const recoveryZ = -leg * 0.3;
   return {
     contactReach: Math.min(geoMax * 0.92, desired),
     roll: limb.foot * 0.9,
@@ -132,6 +187,12 @@ export function stanceGeometry(
     // the raw toe-off point is usually further back than any leg can reach;
     // the limit is what keeps the ankle a real, plantable target
     behindLimit: Math.max(0.12, geoMax * 0.85 - 0.04),
+    recoveryY: clamp(
+      runHip - Math.sqrt(Math.max(0.01, foldDist * foldDist - recoveryZ * recoveryZ)) + 0.09,
+      ANKLE_REST + 0.14,
+      runHip + 0.06,
+    ),
+    recoveryZ,
   };
 }
 
@@ -169,15 +230,35 @@ export function footTarget(
     };
   }
 
-  // flight: the foot swings back to the strike point while being carried
-  // forward by the hip, i.e. it travels through a lifted arc
+  // Flight: the recovery, and the most recognisable thing about a sprinter.
+  //
+  // A straight leg swinging forward to the strike point is a march. Real
+  // sprinters fold the swing leg hard — heel up toward the seat, knee driven
+  // through — then whip the knee forward and extend to land. A quadratic
+  // Bezier from the toe-off point, up through a control point at the top of the
+  // fold, and down to the strike point gives that whole arc in one expression,
+  // and the control point is a curve handle rather than a point on it, so it
+  // can sit higher than the ankle ever actually gets.
   const fT = (p - stanceFrac) / (1 - stanceFrac);
-  const e = fT * fT * (3 - 2 * fT);
-  const lift = (0.075 + 0.06 * smoothstep((speed - 4) / 8)) * (1 - limp);
+  // the fold is a speed skill: a shuffling athlete barely lifts the heel
+  const fold = smoothstep(clamp((speed - 2.5) / 6, 0, 1)) * (1 - limp);
+  const ctrlY = lerp(ANKLE_REST + 0.05, geo.recoveryY, fold);
+  const ctrlZ = lerp(toeOff, geo.recoveryZ, fold);
+  const inv = 1 - fT;
+  const w0 = inv * inv;
+  const w1 = 2 * inv * fT;
+  const w2 = fT * fT;
   return {
-    y: ANKLE_REST + 0.05 * (1 - e) + Math.sin(fT * Math.PI) * lift,
-    z: lerp(toeOff, geo.contactReach, e),
-    pitch: lerp(rad(38), rad(-7), e),
+    y: w0 * ANKLE_REST + w1 * ctrlY + w2 * ANKLE_REST,
+    z: w0 * toeOff + w1 * ctrlZ + w2 * geo.contactReach,
+    // toe stays pointed down through the fold, then comes up through the drive
+    // to land dorsiflexed
+    pitch: track(fT, [
+      [0, rad(38)],
+      [0.28, rad(46)],
+      [0.62, rad(8)],
+      [1, rad(-7)],
+    ]),
     load: 0,
   };
 }
@@ -191,13 +272,17 @@ export function pelvisHeightFor(
   crouch = 0,
 ): number {
   const leg = limb.thigh + limb.shank - 0.012;
-  // the height the reach alone allows, and the athlete's own standing height
+  // the height the reach alone allows, measured from the *track*: the ankle
+  // sits at ANKLE_REST and the hip joint HIP_JOINT_Y below the pelvis, so the
+  // full-extension pelvis height is the span plus both offsets
   const reachLimit = Math.sqrt(Math.max(0.02, leg * leg - stepReach * stepReach));
-  const stand = Math.min(reachLimit, limb.hipHeight);
-  // the hips drop at mid-stance and stand tall again through the flight that
-  // follows the push; the drive keeps them folded forward while the athlete
-  // is still accelerating, which is why hip height peaks near top speed
-  const bob = (1 - Math.cos(4 * Math.PI * stridePhase)) * 0.5 * 0.03;
+  const stand = Math.min(ANKLE_REST - HIP_JOINT_Y + reachLimit, limb.hipHeight);
+  // The hips drop through the single-support part of the step and stand tall
+  // again as the leg drives off; the drive keeps them folded forward while the
+  // athlete is still accelerating, which is why hip height peaks near top
+  // speed. The bob is a full cycle per *step*, so the two feet alternate
+  // rather than the whole body pulsing once per stride.
+  const bob = (1 - Math.cos(4 * Math.PI * stridePhase)) * 0.5 * GAIT.pelvisRise;
   const drive = driveAmount * 0.055;
   const set = crouch * 0.3;
   return clamp(stand - bob - drive - set, 0.2, stand);

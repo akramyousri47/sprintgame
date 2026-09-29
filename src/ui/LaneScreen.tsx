@@ -24,9 +24,8 @@ export function LaneScreen() {
   const p1Athlete = useGame((s) => s.playerAthleteId);
 
   const go = () => {
-    // last guard before the race exists: the two humans can never share a lane
-    const lane2 = two && player2Lane === playerLane ? (playerLane + 1) % TRACK.lanes : player2Lane;
-    if (two && lane2 !== player2Lane) patch({ player2Lane: lane2 });
+    // startRace() owns the no-shared-lane guard, so the keyboard path and this
+    // button cannot drift apart
     audio.start().then(() => audio.cheer(0.4));
     gameApp().startRace();
   };
@@ -49,11 +48,11 @@ export function LaneScreen() {
               onClick={() => {
                 audio.click();
                 if (two) {
-                  // clicking P2's lane swaps the two, clicking a free lane
-                  // hands it to P1 and pushes P2 off it, so the pair can never
-                  // collapse onto one lane
+                  // clicking P2's lane swaps the two; clicking a free lane (or
+                  // P1's own) just moves P1 and leaves P2 where it is, so the
+                  // pair can never collapse onto one lane
                   if (p2) patch({ playerLane: lane, player2Lane: playerLane });
-                  else patch({ playerLane: lane, player2Lane: p1 ? player2Lane : lane });
+                  else patch({ playerLane: lane });
                 } else {
                   patch({ playerLane: lane });
                 }

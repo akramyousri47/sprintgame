@@ -231,7 +231,7 @@ export class Gait {
     s.blockExit = s.speed;
     s.driveTime = 0;
     s.driveAmount = 1;
-    s.lean = GAIT.leanCrouch * 0.6;
+    s.lean = GAIT.leanDrive;
     s.quality = 1;
     s.stridePhase = 0;
     s.stanceT = 0;
@@ -328,10 +328,15 @@ export class Gait {
     const dAcc = invLerp(0, START.accelPhaseEnd, s.distance);
     const dMax = invLerp(START.accelPhaseEnd, START.maxVelPhaseEnd, s.distance);
     s.driveAmount = clamp(1 - dAcc * 0.82 - dMax * 0.18, 0, 1);
+    // The trunk is most folded while the athlete is still driving hard: the
+    // blocks push is a long lever over the front knee, and as the force fades
+    // the torso comes up into the flatter top-speed posture. Interpolating the
+    // other way round leaves the athlete upright out of the blocks and folded
+    // over at the line, which is not a sprint anyone has ever run.
     const leanTarget = lerp(
-      GAIT.leanUpright,
+      GAIT.leanMaxVelocity,
       GAIT.leanDrive,
-      Math.pow(1 - s.driveAmount, 1.5),
+      Math.pow(s.driveAmount, 0.55),
     );
     s.lean = lerp(s.lean, leanTarget, Math.min(1, dt * 5)) + s.fatigue * 2.5 * (1 - this.p.endurance);
 

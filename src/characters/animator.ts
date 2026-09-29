@@ -17,7 +17,7 @@ import type { Limb } from '../biomechanics/athlete';
 import { clamp, lerp, rad } from '../game/config';
 import { evaluatePose, emptyWeights, normaliseWeights } from '../biomechanics/pose';
 import type { BlendWeights, PoseMap } from '../biomechanics/pose';
-import { ANKLE_REST, footTarget, pelvisHeightFor, solveLegIK, stanceGeometry } from '../biomechanics/ik';
+import { ANKLE_REST, footTarget, pelvisHeightFor, solveLegToTarget, stanceGeometry } from '../biomechanics/ik';
 import type { FootTarget, LegIK } from '../biomechanics/ik';
 import { buildHumanoid } from './humanoid';
 import type { Appearance, BodyShape, Detail, Humanoid } from './humanoid';
@@ -164,7 +164,6 @@ export class Sprinter {
     }
 
     /* --- 3. legs: IK, never keyframes ------------------------------ */
-    const hipJointY = 0.015;
     const hw = limb.hipWidth * 0.5;
 
     for (let i = 0; i < 2; i++) {
@@ -185,21 +184,16 @@ export class Sprinter {
       }
       this.target = t;
 
-      // the hips rotate with the trunk, so the target is pulled into the hips'
-      // frame — otherwise the lean would shift every foot placement sideways
-      this.tmp.set(sgn * hw, t.y, s.distance + t.z);
+      // The hips rotate with the trunk, so the target is pulled into the hips'
+      // frame — otherwise the lean would shift every foot placement sideways.
+      // `localToWorld` already adds the athlete's distance along the track, so
+      // the vector starts in the root's own frame and `tmp` comes back relative
+      // to the pelvis origin, which is what solveLegToTarget expects.
+      this.tmp.set(sgn * hw, t.y, t.z);
       this.human.root.localToWorld(this.tmp);
       b.hips.worldToLocal(this.tmp);
 
-      const leg = solveLegIK(
-        this.tmp.y - hipJointY,
-        0,
-        this.tmp.y,
-        this.tmp.z,
-        limb.thigh,
-        limb.shank,
-        1,
-      );
+      const leg = solveLegToTarget(this.tmp.y, this.tmp.z, limb);
       this.leg = leg;
       b[`thigh${tag}`].rotation.x = leg.thigh;
       b[`shin${tag}`].rotation.x = leg.knee;

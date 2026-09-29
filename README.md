@@ -16,7 +16,7 @@ npm run dev      # http://127.0.0.1:5199
 
 ```bash
 npm run typecheck  # tsc --noEmit, strict
-npm test           # vitest, 61 tests
+npm test           # vitest, 73 tests
 npm run build      # tsc && vite build
 npm run preview
 ```
@@ -129,6 +129,29 @@ The model is deliberately physical rather than a speed curve with an animation o
 - The IK solver is two-bone and analytic in the sagittal plane, with a pole that selects
   which way the knee bulges.
 
+## Making it look like a sprinter
+
+The legs are solved; the upper body is procedural. A run cycle passes for "human" only if
+the shape of the motion is right, so these are the details that do the work:
+
+- **Heel to the seat.** A straight leg swinging forward to the strike point is a march. The
+  swing leg folds hard — ankle up behind the hip at roughly 45% of full leg extension, knee
+  flexed about 115° — and then whips forward to extend for the strike. The whole arc is one
+  quadratic Bézier from the toe-off point, through a control point at the top of the fold,
+  to the strike point. The fold is scaled by speed, so a shuffling athlete barely lifts.
+- **Asymmetric arms.** Flexion (78°) always exceeds extension (38°). A symmetric swing is
+  the single clearest tell of a puppet. The waveform is analytic rather than keyframed,
+  because a keyed track smooth-steps to a standstill at every key and the arm visibly pulses
+  between beats; a phase bias leads the forward peak so the arm eases into the top of the
+  swing and is whipped back through the other half.
+- **A level head.** The trunk lean is distributed across pelvis, spine and chest, and the
+  neck and head take it all back out, so the athlete runs folded forward at 24° with the gaze
+  still level.
+- **The trunk rises as the speed comes up.** The blocks push is a long lever over the front
+  knee at 42°; as the force fades the torso comes up into the flatter 24° top-speed posture.
+- **Shoulder–hip separation.** The pelvis drives the rotation and the shoulders counter it,
+  which is what makes a sprint look driven rather than wound up.
+
 ## Tuning
 
 All gameplay numbers live in `src/game/config.ts`: track and lane geometry, gait limits,
@@ -138,7 +161,7 @@ the systems code.
 
 ## Tests
 
-61 tests, all passing.
+73 tests, all passing.
 
 - `tests/gait.test.ts` — cadence/step-length coupling, acceleration, fatigue, rhythm
   grading, overstriding.
@@ -146,6 +169,10 @@ the systems code.
   versus lane separation, finish, dive bonus, determinism.
 - `tests/ik.test.ts` — bone lengths, ankle-on-target, knee pole, reach clamping, stance
   geometry limits, foot roll-over, pelvis height, and the agreement between the three.
+- `tests/animation.test.ts` — the *shape* of the motion rather than its numbers: asymmetric
+  arm swing, a swing with no dead points between beats, elbow coupling, true antiphase
+  between the arms, a level head under a folded trunk, the heel-to-butt recovery fold, and
+  the trunk rising out of the blocks rather than folding further forward.
 
 ## Storage
 

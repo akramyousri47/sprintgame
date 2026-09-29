@@ -47,21 +47,6 @@ const set = (out: PoseMap, bone: string, x: number, y = 0, z = 0): void => {
   out[bone] = { x, y, z };
 };
 
-/** smooth keyframe track over a normalised phase */
-function track(phase: number, keys: readonly (readonly [number, number])[]): number {
-  const p = phase - Math.floor(phase);
-  for (let i = 1; i < keys.length; i++) {
-    if (p <= keys[i][0]) {
-      const [t0, v0] = keys[i - 1];
-      const [t1, v1] = keys[i];
-      let u = (p - t0) / Math.max(1e-5, t1 - t0);
-      u = u * u * (3 - 2 * u);
-      return lerp(v0, v1, u);
-    }
-  }
-  return keys[keys.length - 1][1];
-}
-
 /* ------------------------------------------------------------------ */
 /* clips                                                               */
 /* ------------------------------------------------------------------ */
@@ -69,14 +54,50 @@ function track(phase: number, keys: readonly (readonly [number, number])[]): num
 /** trunk: pelvis tilt, spine counter-rotation, head stabilisation */
 function trunk(c: PoseContext, out: PoseMap, extraPitch = 0): void {
   const wobble = Math.sin(c.stridePhase * Math.PI * 2);
-  // pelvic rotation drives the shoulders the other way — the classic
-  // shoulder-hip separation that makes a sprint look like a sprint
-  set(out, 'hips', rad(-c.lean * 0.22) + extraPitch, rad(wobble * 5.5), rad(wobble * 2.2));
-  set(out, 'spine', rad(c.lean * 0.24), rad(-wobble * 4.5), rad(-wobble * 2.6));
-  set(out, 'chest', rad(c.lean * 0.3), rad(-wobble * 5.5), rad(-wobble * 1.8));
+  // The lean is distributed rather than dumped on one joint: the pelvis stays
+  // close to vertical, the spine and chest carry the trunk forward, and the
+  // neck and head take it all back out again so the gaze stays level. A lean
+  // applied only to the chest tips the athlete over at the waist; a lean
+  // applied only to the neck leaves them folded at the head.
+  set(out, 'hips', rad(c.lean * 0.08) + extraPitch, rad(wobble * 7), rad(wobble * 2.2));
+  set(out, 'spine', rad(c.lean * 0.34), rad(-wobble * 5), rad(-wobble * 2.6));
+  set(out, 'chest', rad(c.lean * 0.38), rad(-wobble * 6.5), rad(-wobble * 1.8));
   // the sprinter keeps the head level whatever the trunk does
   set(out, 'neck', rad(-c.lean * 0.42), rad(wobble * 2.2), 0);
-  set(out, 'head', rad(-c.lean * 0.36), rad(wobble * 1.6), rad(wobble * 1.2));
+  set(out, 'head', rad(-c.lean * 0.3), rad(wobble * 1.6), rad(wobble * 1.2));
+}
+
+/**
+ * Shoulder angle in degrees for an arm at this phase: positive is forward.
+ *
+ * The swing is an analytic waveform rather than a keyed track. Keyed tracks
+ * smooth-step to a standstill at every key, which makes the arm visibly pulse
+ * between beats; this is smooth everywhere.
+ *
+ * Three things make it read as a driven arm rather than a swung one:
+ *   - the offset places the range on [+forward, -back], so flexion always
+ *     exceeds extension; a symmetric swing is the puppet tell
+ *   - the phase bias leads the forward peak, so the arm eases into the top of
+ *     the swing and is whipped back through the other half
+ *   - the third harmonic broadens the front of the swing and sharpens the back
+ *
+ * Every term is pi-antiperiodic, so the two arms stay exact half-cycles apart
+ * however the shape is tuned.
+ */
+function armShoulder(phase: number, forward: number, back: number, bias: number): number {
+  const u = phase * Math.PI * 2;
+  const mean = (forward + back) / 2;
+  return mean * Math.cos(u - bias) + mean * 0.05 * Math.sin(3 * u) + (forward - back) / 2;
+}
+
+/**
+ * Elbow flexion in degrees. The elbow folds further as the hand is driven up
+ * and forward and is most extended at the back of the swing, so the peak sits
+ * a little *after* the forward peak — the forearm is still travelling upward
+ * when the upper arm has already stopped.
+ */
+function armElbowAt(phase: number, base: number, swing: number): number {
+  return base + swing * Math.cos(phase * Math.PI * 2 + 0.5);
 }
 
 export const clipSprint: Clip = (c, out) => {
@@ -84,27 +105,20 @@ export const clipSprint: Clip = (c, out) => {
   // poor rhythm folds the athlete forward and stiffens the arm action
   const slump = (1 - c.quality) * 8 + c.fatigue * 4;
   trunk({ ...c, lean: c.lean + slump }, out);
+  // a shuffling athlete barely reaches with the arms; a flying one drives them
+  const reach = lerp(0.8, 1.06, drive) * lerp(0.84, 1, c.quality);
   for (const side of ['L', 'R'] as const) {
-    // arms are contralateral: the arm driven by the opposite leg's phase
+    // arms are contralateral: the arm is fully forward as the opposite leg
+    // strikes, so the right arm leads with the left foot
     const ph = (c.stridePhase + (side === 'L' ? 0.5 : 0)) % 1;
-    const amp = GAIT.armSwing * lerp(0.82, 1.08, drive) * lerp(0.8, 1, c.quality);
-    const sh = track(ph, [
-      [0, amp * 0.5],
-      [0.25, amp * 0.24],
-      [0.5, -amp * 0.44],
-      [0.75, -amp * 0.52],
-      [1, amp * 0.5],
-    ]);
-    const elbow = track(ph, [
-      [0, GAIT.armElbow],
-      [0.22, GAIT.armElbow + 12],
-      [0.5, GAIT.armElbow - 6],
-      [0.78, GAIT.armElbow - 10],
-      [1, GAIT.armElbow],
-    ]);
+    const sh = armShoulder(ph, GAIT.armForward, GAIT.armBack, GAIT.armDriveBias) * reach;
+    const elbow = armElbowAt(ph, GAIT.armElbow, GAIT.armElbowSwing) * lerp(0.95, 1, drive);
     const s = side === 'L' ? -1 : 1;
-    set(out, `clavicle${side}`, rad(-sh * 0.1), 0, rad(s * 2));
-    set(out, `upperArm${side}`, rad(-sh), rad(s * -4), rad(s * (5 + drive * 3)));
+    // the shoulder girdle leads: the clavicle protracts as the hand comes
+    // forward, which is where the swing actually gets its drive from
+    set(out, `clavicle${side}`, rad(-Math.max(0, sh) * 0.12), 0, rad(-s * 2));
+    // adducted, not winged: the hands pass close to the midline in front
+    set(out, `upperArm${side}`, rad(-sh), rad(s * -4), rad(-s * (GAIT.armAdduct + drive * 2)));
     set(out, `foreArm${side}`, rad(-elbow), 0, 0);
     set(out, `hand${side}`, rad(-12 - c.fatigue * 10), 0, 0);
   }
