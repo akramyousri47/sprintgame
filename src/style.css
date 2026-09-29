@@ -1,0 +1,83 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-tartan: #b8412f;
+  --color-tartan-dark: #8d2f21;
+  --color-ink: #05070d;
+  --color-cyan-glow: #22d3ee;
+  --font-display: 'Archivo Black', 'Arial Black', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  background: #05070d;
+  overscroll-behavior: none;
+}
+
+canvas {
+  display: block;
+}
+
+@utility display {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* HUD flash when a stride lands perfectly */
+@keyframes strideFlash {
+  0% {
+    opacity: 0.9;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+.stride-flash {
+  animation: strideFlash 0.22s ease-out forwards;
+}
+
+@keyframes gunShake {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(-3px, 2px);
+  }
+  40% {
+    transform: translate(3px, -2px);
+  }
+  60% {
+    transform: translate(-2px, -1px);
+  }
+  80% {
+    transform: translate(2px, 1px);
+  }
+}
+
+.gun-shake {
+  animation: gunShake 0.32s ease-out;
+}
+
+/* scanline texture for the stadium big screen */
+.scanlines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.06) 0px,
+    rgba(255, 255, 255, 0.06) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
